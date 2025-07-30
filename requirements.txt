@@ -1,0 +1,7 @@
+rich
+PyYAML
+python-dotenv
+google-generativeai
+whisperx
+pyannote.audio
+pydub

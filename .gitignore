@@ -1,0 +1,12 @@
+# Environment
+.env
+venv/
+
+# Python
+__pycache__/
+
+# Cache
+model_cache/
+
+# Archives (Optional, but good to add)
+archives/

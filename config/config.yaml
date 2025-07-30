@@ -1,0 +1,22 @@
+app_settings:
+  gemini_model: gemini-2.5-flash-latest
+  incoming_audio_dir: incoming/
+  processed_recordings_dir: processed_recordings/
+llm_prompts:
+  highlights_prompt: 'You are an AI assistant that extracts key information from academic
+    lectures. From the provided transcript, identify the most important key points,
+    definitions, and conclusions in chronological order.
+
+
+    Format your response as a markdown bulleted list. Each bullet point should be
+    a single, concise sentence.
+
+
+    Do not include a title, introduction, or any text other than the bulleted list
+    itself.'
+  summary_prompt: 'You are an expert academic summarizer. Your task is to create a
+    dense, paragraph-form summary of the provided lecture transcript. Do not include
+    any introductory or concluding phrases like "Here is the summary". Provide only
+    the summary text itself.
+
+    '

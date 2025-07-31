@@ -1,4 +1,7 @@
 import os
+import re # Import the 're' module
+from datetime import datetime # Import datetime
+
 # ADD THIS LINE AT THE TOP OF THE FILE
 os.environ['HUGGING_FACE_HUB_CACHE'] = os.path.join(os.getcwd(), 'model_cache')
 
@@ -103,7 +106,7 @@ def load_models():
         # Initialize Gemini model
         console.print("  - Initializing Gemini model...")
         genai.configure(api_key=gemini_api_key)
-        gemini_model = genai.GenerativeModel('gemini-pro')
+        gemini_model = genai.GenerativeModel('gemini-1.5-flash-latest') # Updated to a valid model
         console.print("[green]  - Gemini model initialized.[/green]")
 
         console.print("[bold green]All AI models loaded successfully.[/bold green]")
@@ -130,7 +133,7 @@ def process_audio_file(filepath, config_data, classes_data, loaded_models):
         return None
     
     # Segment the transcription
-    segmented_lectures = segment_audio_by_class(transcription_result, classes_data, filepath) # Modified to pass filepath
+    segmented_lectures = segment_audio_by_class(transcription_result, classes_data, filepath, loaded_models) # Modified to pass filepath and loaded_models
     if not segmented_lectures:
         console.print("[red]Failed to segment audio into classes.[/red]")
         return None
@@ -222,7 +225,7 @@ def transcribe_and_diarize(filepath, whisper_model, diarization_pipeline):
         console.print(f"[red]Error during transcription/diarization:[/red] {e}")
         return None
     
-def segment_audio_by_class(transcription_result, classes_data, audio_filepath): # Added audio_filepath parameter
+def segment_audio_by_class(transcription_result, classes_data, audio_filepath, loaded_models): # Added audio_filepath and loaded_models parameters
     """
     Segments the transcription based on filename convention and class schedules.
     """
@@ -253,8 +256,8 @@ def segment_audio_by_class(transcription_result, classes_data, audio_filepath): 
     
     # --- Filename Parsing Logic ---
     base_filename = os.path.basename(audio_filepath)
-    # Expected format: YYYY-MM-DD_HH-MM-SS_#.mp3
-    match = re.match(r"(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_.*\.mp3", base_filename)
+    # Expected format: YYYY-MM-DD_HH-MM-SS_#.mp3 or YYYY-MM-DD_HH-MM-SS_#.wav
+    match = re.match(r"(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_.*\.(mp3|wav)", base_filename)
     
     if not match:
         console.print(f"[red]Filename '{base_filename}' does not match expected format (YYYY-MM-DD_HH-MM-SS_#.mp3). Cannot segment by schedule.[/red]")
@@ -279,7 +282,7 @@ def segment_audio_by_class(transcription_result, classes_data, audio_filepath): 
 
     file_date_str, file_time_str = match.groups()
     try:
-        file_datetime = datetime.strptime(f"{file_date_str} {file_time_str}", "%Y-%m-%d %H-%M-%S")
+        file_datetime = datetime.strptime(f"{file_date_str} {file_time_str}", "%Y%m%d %H%M%S")
         file_day_of_week = file_datetime.strftime("%A") # e.g., "Monday"
         file_time_obj = file_datetime.time()
     except ValueError as e:
@@ -338,8 +341,85 @@ def segment_audio_by_class(transcription_result, classes_data, audio_filepath): 
         segmented_lectures[matched_course_name] = [matched_lecture_data]
         console.print(f"[green]  - Segmentation complete. Assigned to course: {matched_course_name}[/green]")
     else:
-        console.print("[yellow]No matching course schedule found for the audio file's date/time.[/yellow]")
-        # Fallback: treat as a single unknown lecture if transcription exists
+        console.print("[yellow]No matching course schedule found for the audio file's date/time. Attempting AI classification.[/yellow]")
+        
+        # --- AI Classification Logic ---
+        if transcription_result and loaded_models and loaded_models.get("gemini"): # Ensure we have transcript, loaded_models, and Gemini model
+            all_class_names = [course["name"] for course in classes_data.get("courses", [])]
+            
+            # Define the Gemini prompt for classification
+            gemini_prompt = f"""You are an AI assistant that classifies lecture transcripts into academic courses. Given the following transcript and a list of available courses, determine which course the transcript most likely belongs to. If it does not clearly belong to any course, respond with 'Uncategorized'.
+
+Available Courses:
+{", ".join(all_class_names)}
+
+Transcript:
+{" ".join([seg["text"] for seg in transcription_result])}
+
+Course:"""
+            
+            try:
+                # Call Gemini to classify
+                gemini_response = generate_ai_content(" ".join([seg["text"] for seg in transcription_result]), gemini_prompt, loaded_models["gemini"])
+                
+                # Clean up Gemini's response to match a class name or 'Uncategorized'
+                predicted_class_name = gemini_response.strip()
+                
+                # Check if the predicted class name is valid or use 'Uncategorized'
+                if predicted_class_name in all_class_names:
+                    matched_course_name = predicted_class_name
+                else:
+                    matched_course_name = "Uncategorized" # Default for unmatched or invalid predictions
+                    console.print(f"[yellow]Gemini response '{predicted_class_name}' not in available courses. Assigning to 'Uncategorized'.[/yellow]")
+
+                # Prepare lecture data with the classified course
+                full_transcript = " ".join([seg["text"] for seg in transcription_result])
+                matched_lecture_data = {
+                    "transcript": full_transcript,
+                    "segments": transcription_result,
+                    "metadata": {
+                        "course": matched_course_name,
+                        "date": file_date_str if match else "N/A", # Keep original date/time if available
+                        "time": file_time_str.replace('-', ':') if match else "N/A",
+                    }
+                }
+                console.print(f"[green]  - AI Classification complete. Assigned to course: {matched_course_name}[/green]")
+
+            except Exception as e:
+                console.print(f"[red]Error during AI classification:[/red] {e}")
+                # Fallback if AI classification fails
+                matched_course_name = "Unknown Course"
+                full_transcript = " ".join([seg["text"] for seg in transcription_result])
+                matched_lecture_data = {
+                    "transcript": full_transcript,
+                    "segments": transcription_result,
+                    "metadata": {
+                        "course": matched_course_name,
+                        "date": file_date_str if match else "N/A",
+                        "time": file_time_str.replace('-', ':') if match else "N/A",
+                    }
+                }
+        else:
+            # Fallback if no transcript, loaded_models, or Gemini model available
+            matched_course_name = "Unknown Course"
+            full_transcript = " ".join([seg["text"] for seg in transcription_result]) if transcription_result else ""
+            matched_lecture_data = {
+                "transcript": full_transcript,
+                "segments": transcription_result,
+                "metadata": {
+                    "course": matched_course_name,
+                    "date": file_date_str if match else "N/A",
+                    "time": file_time_str.replace('-', ':') if match else "N/A",
+                }
+            }
+
+    if matched_course_name and matched_lecture_data:
+        segmented_lectures[matched_course_name] = [matched_lecture_data]
+        console.print(f"[green]  - Segmentation complete. Assigned to course: {matched_course_name}[/green]")
+    else:
+        # This part should ideally not be reached if the above logic covers all cases
+        # but as a safeguard:
+        console.print("[red]  - Failed to assign lecture to any course.[/red]")
         if transcription_result:
             full_transcript = " ".join([seg["text"] for seg in transcription_result])
             segmented_lectures["Unknown Course"] = [

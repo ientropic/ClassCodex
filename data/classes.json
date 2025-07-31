@@ -2,31 +2,31 @@
   "courses": [
     {
       "name": "Year 7 Language and Literature",
+      "keywords": [
+        "MYP"
+      ],
+      "duration_minutes": 55,
       "schedule": [
         {
-          "days": ["Monday"],
-          "start_time": "09:00"
-        },
-        {
-          "days": ["Wednesday"],
-          "start_time": "09:00"
+          "days": [
+            "Thursday"
+          ],
+          "start_time": "13:00"
         }
-      ],
-      "duration_minutes": 55
+      ]
     },
     {
       "name": "Year 8 Language and Literature",
       "schedule": [
         {
-          "days": ["Tuesday"],
+          "days": [
+            "Tuesday"
+          ],
           "start_time": "14:30"
-        },
-        {
-          "days": ["Thursday"],
-          "start_time": "10:00"
         }
       ],
-      "duration_minutes": 55
+      "duration_minutes": 55,
+      "keywords": []
     }
   ]
 }

@@ -185,9 +185,13 @@ def handle_process_recordings(config_data, classes_data, loaded_models, audio_pr
 
                     # Move SRT file
                     processed_srt_path = os.path.join("processed_recordings", f"{base_filename}.srt")
+                    archive_srt_path = os.path.join(archive_subdir, f"{base_filename}.srt") # Define archive path
                     if os.path.exists(processed_srt_path):
-                        os.rename(processed_srt_path, os.path.join(archive_subdir, f"{base_filename}.srt"))
-                        console.print(f"[green]Archived SRT file:[/green] {base_filename}.srt")
+                        if not os.path.exists(archive_srt_path): # Check if destination exists
+                            os.rename(processed_srt_path, archive_srt_path)
+                            console.print(f"[green]Archived SRT file:[/green] {base_filename}.srt")
+                        else:
+                            console.print(f"[yellow]SRT file already exists in archive, skipping move:[/yellow] {base_filename}.srt")
                 else:
                     console.print(f"[red]Failed to process {os.path.basename(filepath)}.[/red]")
             except Exception as e:
@@ -217,9 +221,24 @@ def handle_view_recordings(classes_data, config_data):
         filepath = os.path.join(data_dir, filename)
         try:
             with open(filepath, 'r') as f:
-                lectures = json.load(f)
-                for lecture in lectures:
-                    all_lectures.append(lecture)
+                content = json.load(f) # Load the content
+
+                lectures_list = []
+                if isinstance(content, list):
+                    # If content is already a list of lectures
+                    lectures_list = content
+                elif isinstance(content, dict) and "lectures" in content and isinstance(content["lectures"], list):
+                    # If content is a dict with a "lectures" key containing a list
+                    lectures_list = content["lectures"]
+                # else: content is not in an expected format, skip or log a warning
+
+                for lecture in lectures_list:
+                    # Ensure lecture is a dictionary before appending
+                    if isinstance(lecture, dict):
+                        all_lectures.append(lecture)
+                    else:
+                        console.print(f"[yellow]Skipping non-dictionary item in {filename}: {lecture}[/yellow]")
+
         except Exception as e:
             console.print(f"[red]Error reading class file {filename}: {e}[/red]")
 
@@ -432,13 +451,25 @@ def view_all_courses(classes_data):
     table.add_column("Course Name", width=30)
     table.add_column("Keywords", width=40)
     table.add_column("Duration (min)", width=15)
+    table.add_column("Schedule", width=40) # Added Schedule column
 
     for i, course in enumerate(classes_data["courses"]):
+        # Format schedule for display
+        schedule_info = "No schedule set"
+        if "schedule" in course and course["schedule"]:
+            schedule_entries = []
+            for entry in course["schedule"]:
+                days = ", ".join(entry.get("days", []))
+                start_time = entry.get("start_time", "N/A")
+                schedule_entries.append(f"{days} {start_time}")
+            schedule_info = "; ".join(schedule_entries)
+        
         table.add_row(
             str(i + 1),
             course["name"],
-            ", ".join(course["keywords"]),
-            str(course["duration_minutes"])
+            ", ".join(course.get("keywords", [])),
+            str(course["duration_minutes"]),
+            schedule_info # Add schedule info to the row
         )
     console.print(table)
     console.print("Press Enter to return to the Manage Courses menu...")
@@ -489,7 +520,7 @@ def edit_course(classes_data):
         table.add_row(
             str(i + 1),
             course["name"],
-            ", ".join(course["keywords"]),
+            ", ".join(course.get("keywords", [])),
             str(course["duration_minutes"])
         )
     console.print(table)
@@ -511,10 +542,11 @@ def edit_course(classes_data):
     course = classes_data["courses"][course_index]
     console.print(f"\nEditing course: [bold]{course['name']}[/bold]")
 
+    # --- Edit Basic Course Info ---
     new_name = console.input(f"Enter new course name (current: {course['name']}): ") or course['name']
     
-    keywords_str = console.input(f"Enter new keywords (comma-separated, current: {', '.join(course['keywords'])}): ")
-    new_keywords = [k.strip() for k in keywords_str.split(',') if k.strip()] if keywords_str else course['keywords']
+    keywords_str = console.input(f"Enter new keywords (comma-separated, current: {', '.join(course.get('keywords', []))}): ")
+    new_keywords = [k.strip() for k in keywords_str.split(',') if k.strip()] if keywords_str else course.get('keywords', [])
 
     while True:
         duration_str = console.input(f"Enter new duration in minutes (current: {course['duration_minutes']}): ")
@@ -530,11 +562,94 @@ def edit_course(classes_data):
         except ValueError:
             console.print("[red]Invalid input. Please enter a number for duration.[/red]")
 
-    classes_data["courses"][course_index] = { # Corrected index variable
-        "name": new_name,
-        "keywords": new_keywords,
-        "duration_minutes": new_duration
-    }
+    # --- Edit Schedule ---
+    current_schedule = course.get("schedule", [])
+    console.print("\nCurrent Schedule:")
+    if not current_schedule:
+        console.print("[italic]No schedule set.[/italic]")
+    else:
+        for i, entry in enumerate(current_schedule):
+            days = ", ".join(entry.get("days", []))
+            start_time = entry.get("start_time", "N/A")
+            console.print(f"{i + 1}. Days: {days}, Start Time: {start_time}")
+
+    while True:
+        console.print("\nSchedule Options:")
+        console.print("1. Add new schedule entry")
+        if current_schedule: # Only show edit/delete if there are entries
+            console.print("2. Edit existing schedule entry")
+            console.print("3. Delete schedule entry")
+        console.print("4. Done editing schedule")
+        
+        schedule_choice = console.input("Enter your choice (1-4): ")
+
+        if schedule_choice == '1':
+            # Add new schedule entry
+            days_str = console.input("Enter days for the new entry (e.g., Monday, Tuesday): ")
+            start_time = console.input("Enter start time (e.g., 13:00): ")
+            if days_str and start_time:
+                new_entry = {
+                    "days": [d.strip() for d in days_str.split(',') if d.strip()],
+                    "start_time": start_time
+                }
+                current_schedule.append(new_entry)
+                console.print("[green]Schedule entry added.[/green]")
+            else:
+                console.print("[red]Days and start time are required.[/red]")
+        elif schedule_choice == '2':
+            # Edit existing schedule entry
+            if not current_schedule:
+                console.print("[yellow]No schedule entries to edit. Please add an entry first.[/yellow]")
+                continue
+            
+            entry_id_str = console.input("Enter the number of the entry to edit: ")
+            try:
+                entry_id = int(entry_id_str)
+                if 1 <= entry_id <= len(current_schedule):
+                    entry_index = entry_id - 1
+                    days_str = console.input(f"Enter new days (current: {', '.join(current_schedule[entry_index].get('days', []))}): ")
+                    start_time = console.input(f"Enter new start time (current: {current_schedule[entry_index].get('start_time', 'N/A')}): ")
+                    
+                    if days_str:
+                        current_schedule[entry_index]["days"] = [d.strip() for d in days_str.split(',') if d.strip()]
+                    if start_time:
+                        current_schedule[entry_index]["start_time"] = start_time
+                    
+                    console.print("[green]Schedule entry updated.[/green]")
+                else:
+                    console.print("[red]Invalid entry number.[/red]")
+            except ValueError:
+                console.print("[red]Invalid input. Please enter a number.[/red]")
+        elif schedule_choice == '3':
+            # Delete schedule entry
+            if not current_schedule:
+                console.print("[yellow]No schedule entries to delete. Please add an entry first.[/yellow]")
+                continue
+            
+            entry_id_str = console.input("Enter the number of the entry to delete: ")
+            try:
+                entry_id = int(entry_id_str)
+                if 1 <= entry_id <= len(current_schedule):
+                    del current_schedule[entry_id - 1]
+                    console.print("[green]Schedule entry deleted.[/green]")
+                else:
+                    console.print("[red]Invalid entry number.[/red]")
+            except ValueError:
+                console.print("[red]Invalid input. Please enter a number.[/red]")
+        elif schedule_choice == '4':
+            # Done editing schedule
+            break
+        else:
+            console.print("[red]Invalid choice. Please enter a number between 1 and 4.[/red]")
+
+    # Update the course data with the potentially modified schedule
+    classes_data["courses"][course_index]["schedule"] = current_schedule
+    
+    # Update the course dictionary with new basic info
+    classes_data["courses"][course_index]["name"] = new_name
+    classes_data["courses"][course_index]["keywords"] = new_keywords
+    classes_data["courses"][course_index]["duration_minutes"] = new_duration
+
     save_classes_handler(classes_data, CLASSES_PATH) # Use handler
     console.print(f"[green]Course '{new_name}' updated successfully.[/green]")
     return classes_data # Return modified data
@@ -565,12 +680,11 @@ def handle_select_gemini_model(config_data):
         input()
         return config_data
 
-    # Present the most recent/relevant models
-    # Sorting might be needed if the API doesn't return them in a logical order
-    # For now, we'll take the first 4 relevant ones.
-    models_to_show = [m for m in available_models if 'latest' in m]
+    # Present only the 2.5 models
+    models_to_show = [m for m in available_models if '2.5' in m]
     if not models_to_show:
-        models_to_show = sorted(available_models, reverse=True)[:4] # Fallback to sorting
+        # Fallback to showing all models if no 2.5 models are available
+        models_to_show = sorted(available_models, reverse=True)[:4]
 
     console.print("\nSelect a new model:")
     for i, model_name in enumerate(models_to_show):
@@ -615,7 +729,7 @@ def delete_course(classes_data):
         table.add_row(
             str(i + 1),
             course["name"],
-            ", ".join(course["keywords"]),
+            ", ".join(course.get("keywords", [])),
             str(course["duration_minutes"])
         )
     console.print(table)

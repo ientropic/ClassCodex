@@ -1,5 +1,6 @@
 app_settings:
-  gemini_model: gemini-2.5-flash-latest
+  gemini_api_key: AIzaSyA6i7jiNrazn8RRH12UAxiGAb-bXK5ySic
+  gemini_model: models/gemini-2.5-flash-preview-05-20
   incoming_audio_dir: incoming/
   processed_recordings_dir: processed_recordings/
 llm_prompts:

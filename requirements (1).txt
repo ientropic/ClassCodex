@@ -1,0 +1,6 @@
+Flask
+pydub
+whisperx
+# For CUDA 12.1:
+torch==2.3.0+cu121
+torchaudio==2.3.0+cu121
